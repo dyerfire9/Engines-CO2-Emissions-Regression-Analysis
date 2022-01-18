@@ -1,0 +1,463 @@
+---
+title: "Exploration Of The Relationship of Engines & CO2 Emissions"
+author: "Muhammad Abdul Mannan | 1006216541"
+date: "17/12/2021"
+output: pdf_document
+fontsize: 10pt
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(visdat)
+library(ggplot2)
+library(car)
+library(leaps)
+
+```
+
+ 
+# Clean Dataset
+```{r, echo=FALSE, include=FALSE}
+# load data
+dataset <- read.csv("Fuel Consumption Ratings.csv")
+# clean variable names
+dataset <- clean_names(dataset)
+
+# modify variable names
+names(dataset)[names(dataset) == 'model'] <- 'vehicle_year'
+names(dataset)[names(dataset) == 'model_1'] <- 'model'
+names(dataset)[names(dataset) == 'engine_size'] <- 'engine_size_L'
+names(dataset)[names(dataset) == 'fuel'] <- 'fuel_type'
+names(dataset)[names(dataset) == 'fuel_consumption'] <- 'fuel_con_city'
+names(dataset)[names(dataset) == 'x'] <- 'fuel_con_hw'
+names(dataset)[names(dataset) == 'x_1'] <- 'fuel_con_comb'
+names(dataset)[names(dataset) == 'x_2'] <- 'fuel_con_comb_mpg'
+names(dataset)[names(dataset) == 'co2_emissions'] <- 'co2_emissions'
+
+dataset <- dataset %>% select(vehicle_year:co2_emissions)
+dataset <- dataset[-c(1),] 
+dataset <- na.omit(dataset)
+
+# convert variables into numeric variables
+dataset$vehicle_year <- as.numeric(dataset$vehicle_year)
+dataset$engine_size_L <- as.numeric(dataset$engine_size_L)
+dataset$fuel_con_city <- as.numeric(dataset$fuel_con_city)
+dataset$fuel_con_hw <- as.numeric(dataset$fuel_con_hw)
+dataset$fuel_con_comb <- as.numeric(dataset$fuel_con_comb)
+dataset$fuel_con_comb_mpg <- as.numeric(dataset$fuel_con_comb_mpg)
+dataset$co2_emissions <- as.numeric(dataset$co2_emissions)
+dataset$ID <- seq.int(nrow(dataset))
+
+# select relevant variables
+dataset <- dataset %>% select(engine_size_L, cylinders, co2_emissions, ID)
+
+```
+
+
+
+
+# EDA
+```{r echo=FALSE}
+# Histograms seem look decent - though there is a slight right skew
+hist(dataset$engine_size_L, main="Engine Size (Litres)", xlab="Engine Size (Litres)")
+hist(dataset$cylinders, main="Cylinder", xlab="Cylinder")
+# Response looks quite nice and normal but very slight skew maybe
+hist(dataset$co2_emissions, main="CO2 Emissions", xlab="CO2 Emissions")
+
+# Plot scatterplots of response vs predictors
+# Scatterplot has slight curve
+plot(dataset$co2_emissions ~ dataset$engine_size_L, main="CO2 Emissions (g/km)) v. Engine Size (L)", xlab="Engine Size (L)", ylab="CO2 Emissions (g/km))")
+
+#
+plot(dataset$co2_emissions ~ dataset$cylinders, main="CO2 Emissions (g/km)) v. Number of Cylinders", xlab="Engine Size (L)", ylab="Number of Cylinders")
+
+# Each predictor does look linearly related to response
+# We see skews in the variables and possible curves in the scatterplots, indicating we may have issues with non-linearity and non-normality
+# We need to do a transformation
+```
+
+# Check Assumptions
+```{r echo=FALSE}
+
+# fit model
+mod <- lm(co2_emissions ~ engine_size_L + cylinders, data=dataset)
+summary(mod)
+
+# resid() - Will extract the residuals from our model
+r <- resid(mod)
+
+# Check Condition 2:
+pairs(dataset[,1:3])
+
+# Check Condition 1: 
+# plot response vs fitted values, we see the same kind of curve
+plot(dataset$co2_emissions ~ fitted(mod), main="Response vs Fitted Values", xlab="Fitted Values", ylab="Response")
+# Add a diagonal identity function through the plot as a guide
+abline(a = 0, b = 1)
+# Add lowess function as it picks up any abnormal pattern occurring in our plots 
+lines(lowess(dataset$co2_emissions ~ fitted(mod)), lty=2)
+
+# Now plot the residual Plots to see what may be causing issues in our model
+par(mfrow=c(2,3))
+
+# Now we get slightly more randomly scattered plots so this shows that our box-cox transformation worked
+plot(r ~ fitted(mod), main="Fitted vs Residuals", xlab="Fitted", ylab="res.")
+
+# Now we check the residual plots for each predictor to see if there are issues with any of the predictors
+# Ideally we want to see no pattern at all and seems its random with no clusters or patterns
+plot(r ~ dataset$engine_size_L, main="Engine Size vs Residuals", xlab="Engine Size", ylab="res")
+plot(r ~ dataset$cylinders, main="No. of Cylinders vs Residuals", xlab="No. of Cylinders", ylab="res")
+
+# Now we check qq-plot to check normality
+# We can see deviations at the tails, we need to fix this
+qqnorm(r, main="QQ-Plot")
+qqline(resid(mod))
+
+
+
+```
+# Power transformation
+```{r}
+p <- powerTransform(cbind(dataset[,1], dataset[,2], dataset[,3])~1)
+# can see that we have to do transformation on both response and predictors
+summary(p)
+
+```
+
+Check Conditions and assumptions for transformed model
+```{r echo=FALSE}
+# Fit tranformed model
+mod2 <- lm(I((co2_emissions)^0.33) ~ I((engine_size_L)^0.18) + I((cylinders)^-0.12), data=dataset)
+summary(mod2)
+
+# Create a transformed dataset
+trans_dataset <- dataset
+trans_dataset <- trans_dataset %>% mutate(co2_emissions = I((co2_emissions)^0.33))
+trans_dataset <- trans_dataset %>% mutate(engine_size_L = I((engine_size_L)^0.18))
+trans_dataset <- trans_dataset %>% mutate(cylinders = I((cylinders)^-0.12))
+
+# Get residuals of transformed model
+r2 <- resid(mod2)
+
+# Check Condition 2
+pairs(trans_dataset[,1:3])
+
+# Check Condition 1: 
+# plot response vs fitted values, we see the same kind of curve
+# looks much more straight and linear
+plot(dataset$co2_emissions ~ fitted(mod), main="Response vs Fitted Values", xlab="Fitted Values", ylab="Response")
+abline(a = 0, b = 1)
+lines(lowess(dataset$co2_emissions ~ fitted(mod)), lty=2)
+
+plot(trans_dataset$co2_emissions ~ fitted(mod2), main="Transformed Response cs Fitted Values", xlab="Fitted Values", ylab="Transformed Response")
+# Add a diagonal identity function through the plot to check if everything looks fine (SOLID line)
+abline(a = 0, b = 1)
+# We can also create a lowess function (dashed line): picks up any abnormal pattern occurring in our plots 
+lines(lowess(trans_dataset$co2_emissions ~ fitted(mod2)), lty=2)
+
+# Now Residual Plots indicate WHAT is causing issues in our model
+# make all residual plots
+par(mfrow=c(2,3))
+
+# plot fitted and predictors against residuals
+plot(r2 ~ fitted(mod2), main="Fitted vs Residuals", xlab="Fitted", ylab="res.")
+plot(r2 ~ trans_dataset$engine_size_L, main="Engine Size vs Residuals (Post Transformation)", xlab="Transformed Engine Size", ylab="res")
+plot(r2 ~ trans_dataset$cylinders, main="Number of Cylinders vs Residuals (Post Transformation)", xlab="No. of Cylinders (Transformed)", ylab="res")
+
+# Now we check qq-plot to check normality
+# We can see deviations at the tails, we need to fix this
+qqnorm(r2, main="QQ-Plot Post-Transformation")
+
+
+
+# We will compare how the plots look now:
+# plot original qq-plot 
+qqnorm(r, main="QQ-Plot")
+qqline(resid(mod))
+# plot transformed qq-plot
+qqnorm(r2, main="QQ-Plot Post-Transformation")
+
+# pLot the original response vs fitted scatterplot
+plot(dataset$co2_emissions ~ fitted(mod), main="Response vs Fitted Values", xlab="Fitted Values", ylab="Response")
+abline(a = 0, b = 1)
+lines(lowess(dataset$co2_emissions ~ fitted(mod)), lty=2)
+
+# pLot the transformed response vs fitted scatterplot
+plot(trans_dataset$co2_emissions ~ fitted(mod2), main="Transformed Response vs Fitted Values", xlab="Fitted Values", ylab="Transformed Response")
+# Add a diagonal identity function through the plot to check if everything looks fine (SOLID line)
+abline(a = 0, b = 1)
+# We can also create a lowess function (dashed line): picks up any abnormal pattern occurring in our plots 
+lines(lowess(trans_dataset$co2_emissions ~ fitted(mod2)), lty=2)
+
+# Compare the fitted values vs residual plots
+plot(r2 ~ fitted(mod2), main="Fitted vs Residuals (Post Transforation)", xlab="Fitted", ylab="res.")
+plot(r ~ fitted(mod), main="Fitted vs Residuals (Pre Transformation)", xlab="Fitted", ylab="res.")
+
+# Compare residuals vs predictors (pre/post transformation)
+plot(r ~ dataset$engine_size_L, main="Engine Size vs Residuals", xlab="Engine Size", ylab="res")
+plot(r ~ dataset$cylinders, main="No. of Cylinders vs Residuals", xlab="No. of Cylinders", ylab="res")
+
+plot(r2 ~ trans_dataset$engine_size_L, main="Engine Size vs Residuals (Post Transformation)", xlab="Transformed Engine Size", ylab="res")
+plot(r2 ~ trans_dataset$cylinders, main="Number of Cylinders vs Residuals (Post Transformation)", xlab="No. of Cylinders (Transformed)", ylab="res")
+
+
+# Now the model looks better and normality also looks pretty better compared to the original model
+```
+
+Check & identify problematic observations
+
+Let's start by getting the leverage measurements for our dataset. We have a function built in function called hatvalues() that computes the $h_{ii}$ for all observations in the dataset. Our cutoff for defining a leverage point is $2 \times \frac{p+1}{n}$.
+```{r fig.height=4, fig.width=14, echo=FALSE}
+# information from the model
+# number of response observations
+n <- length(trans_dataset$co2_emissions)
+# number of predictors
+p <- length(coef(mod2))-1
+# calculate the leverage values and compare to cutoff
+h <- hatvalues(mod2)
+
+# which observations are leverage points? We define our cut-off:
+hcut <- 2*(p+1)/n
+
+# Get the leverage values that are greater than the cut-off
+w1 <- which(h > hcut)
+# We see that there are 782 observations that are leverage points
+
+# Add to scatterplots to see the leverage points
+par(mfrow=c(1,2))
+
+# Plot response vs predictors with leverage points in red
+plot(trans_dataset[,3]~trans_dataset[,1], main="CO2 Emissions vs Engine Size (Post Transformation)", xlab="Engine Size (L)", ylab="CO2 Emisssions (g/km)")
+points(trans_dataset[w1,3]~trans_dataset[w1,1], col="red", pch=19)
+
+plot(trans_dataset[,3]~trans_dataset[,2], main="CO2 Emissions vs No. of Cylinders (Post Transformation)", xlab="No. of Cylinders", ylab="CO2 Emisssions (g/km)")
+points(trans_dataset[w1,3]~trans_dataset[w1,2], col="red", pch=19)
+
+# red dots are the flagged leverage points
+# Now we need to understand if the leverage point is being flagged due to it having an extreme value or is it because based on the other data, that value is unusual
+# Are the leverage values seem to be noticeably distant from the other dots? No, so it is likely that they are being flagged because if you take all the 3 of the predictors and determine the center, these points are distant from that center, so it is a combination of predictors that is driving this
+
+```
+
+
+```{r fig.height=4, fig.width=14, echo=FALSE}
+
+# calculate standardized residuals and compare to cutoff
+r <- rstandard(mod2)
+
+# which observations are outliers?
+# use the 'large' dataset cutoffs
+w2 <- which(r < -4 | r > 4)
+# There are 42 observations
+
+# Plot response vs predictors with outliers points in blue
+par(mfrow=c(1,2))
+plot(trans_dataset[,3]~trans_dataset[,1], main="CO2 Emissions vs Engine Size (Post Trans)", xlab="engine Size (L)", ylab="CO2 Emissions (g/km)")
+points(trans_dataset[w2,3]~trans_dataset[w2,1], col="blue", pch=19)
+plot(trans_dataset[,3]~trans_dataset[,2], main="CO2 Emissions vs Number of Cylinder", xlab="Number of Cylinder", ylab="CO2 Emissions (g/km)")
+points(trans_dataset[w2,3]~trans_dataset[w2,2], col="blue", pch=19)
+
+
+# Blue points are outliers
+# The outliers seem to have two outliers which can be seen in the sqrt(def) vs temp graph so they may be driving those.
+
+```
+```{r fig.height=4, fig.width=14, echo=FALSE}
+Dcutoff <- qf(0.5, p+1, n-p-1)
+D <- cooks.distance(mod)
+# Which cook distances are larger than my cutoff?
+w <- which(D > Dcutoff)
+
+# We get named integer(0) = Nothing came back as an influential point
+
+
+# Find the DFFITS and compare to cutoff
+# See if there are observations that influences it's own fitted value
+DFFITScut <- 2*sqrt((p+1)/n)
+dfs <- dffits(mod2)
+w3 <- which(abs(dfs) > DFFITScut)
+# FOund 757 of them (also show that some outliers may be influential)
+
+
+# find the DFBETAS and compare to cutoff 
+# Check if an observation influences the beta values
+DFBETAcut <- 2/sqrt(n)
+dfb <- dfbetas(mod)
+
+# Are there any observations that influence the intercept?
+w4 <- which(abs(dfb[,1]) > DFBETAcut)
+# Found 604 observations that influences the intercept of the model
+
+# Any observations that influence Engine size?
+w5 <- which(abs(dfb[,2]) > DFBETAcut)
+# Found 1046 observations
+
+
+# Any observations that influence Cylinders?
+w6 <- which(abs(dfb[,3]) > DFBETAcut)
+# Found 963 observations
+
+## Plot response vs predictors with influential points in orange
+w <- unique(c(w3, w4, w5, w6))
+par(mfrow=c(1,2))
+plot(trans_dataset[,3]~trans_dataset[,1], main="CO2 Emissions vs Engine Size (L)", xlab="Engine Size (L)", ylab="CO2 Emissions (g/km)")
+points(trans_dataset[w,3]~trans_dataset[w,1], col="orange", pch=19)
+plot(trans_dataset[,3]~trans_dataset[,2], main="CO2 Emissions vs Number of Cylinders", xlab="Number of Cylinders", ylab="CO2 Emissions (g/km)")
+points(trans_dataset[w,3]~trans_dataset[w,2], col="orange", pch=19)
+
+
+# We see things that are generally in the around the trend, but it not due to where they area placed that they were flagged but based on their placement in combination with other factors, it is causing the regression line to get pulled.
+
+# Nothing is telling us why they may be influential, just flag them and explain some possible reasons why this may be happening
+```
+Check for multicollinearity
+```{r echo=FALSE}
+# Create models without each predictor
+mod3 <- lm(I((co2_emissions)^0.33) ~ I((engine_size_L)^0.18), data=dataset)
+mod4 <- lm(I((co2_emissions)^0.33) ~ I((cylinders)^-0.12), data=dataset)
+
+# a function which returns helpful observations
+select = function(model, n)
+{
+  SSres <- sum(model$residuals^2)
+  Rsq <- summary(model)$r.squared
+  Rsq_adj <- summary(model)$adj.r.squared
+  p <- length(model$coefficients) - 1
+  AIC <- n*log(SSres/n) + 2*p     
+  AICc <- AIC + (2*(p+2)*(p+3)/(n-p-1))
+  BIC <- n*log(SSres/n) + (p+2)*log(n)    
+  res <- c(SSres, Rsq, Rsq_adj, AIC, AICc, BIC)
+  names(res) <- c("SSres", "Rsq", "Rsq_adj", "AIC", "AIC_c", "BIC")
+  return(res)
+}
+
+
+select(mod,14253)
+select(mod2,14253)
+select(mod3,14253)
+select(mod4,14253)
+
+# Based on this we should choose mod2 as it has a lower AIC, AIC_c, and BIC and has a slightly higher Rsq_adj which is exactly what we want.
+
+```
+
+Check anova and check if removing a predictor will benefit the model using the all possible subsets selection process. We have a total of 3 models since we have 2 predictors
+```{r}
+# Looking at the Adj-Rsq, mod2 has the highest value so it explains the most variation
+summary(mod2)
+summary(mod3)
+summary(mod4)
+anova(mod2)
+# We see that we should not remove cylinders & engine size as it is significant as we reject the null that cylinders should be 0 so it needs to be present in the model
+anova(mod3, mod2)
+anova(mod4, mod2)
+# This tells us that we should keep both engine_size and cylinders in the model as they explain a significant portion of variation
+```
+
+Validate Model
+```{r, echo=FALSE}
+# Create the two data sets by halving the transformed dataset
+set.seed(1)
+train <- trans_dataset[sample(1:nrow(trans_dataset), 7126, replace=F),]
+test <- trans_dataset[which(!(trans_dataset$ID %in% train$ID)),]
+
+# Calculate the mean and standard devations of both data sets
+mtr <- apply(train[,c(3,2,1)], 2, mean)
+sdtr <- apply(train[,c(3,2,1)], 2, sd)
+
+mtest <- apply(test[,c(3,2,1)], 2, mean)
+sdtest <- apply(test[,c(3,2,1)], 2, sd)
+```
+
+Variable | mean (s.d.) in training | mean (s.d.) in test
+---------|-------------------------|--------------------
+`r names(test)[3]` | `r round(mtr[1], 3)` (`r round(sdtr[1], 3)`) | `r round(mtest[1], 3)` (`r round(sdtest[1], 3)`)
+`r names(test)[2]` | `r round(mtr[2],3)` (`r round(sdtr[2],3)`) | `r round(mtest[2],3)` (`r round(sdtest[2],3)`)
+`r names(test)[1]` | `r round(mtr[3],3)` (`r round(sdtr[3],3)`) | `r round(mtest[3],3)` (`r round(sdtest[3],3)`)
+
+
+These models are reasonably similar
+
+EDA
+```{r}
+# Conduct eda same as before
+hist(train$engine_size_L, main="Engine Size (Litres)", xlab="Engine Size (Litres)")
+hist(train$cylinders, main="Cylinder", xlab="Number of Cylinders")
+hist(train$co2_emissions, main="CO2 Emissions", xlab="CO2 Emissions (g/km)")
+
+plot(train$co2_emissions ~ train$engine_size_L, main="CO2 Emissions (g/km)) v. Engine Size (L)", xlab="Engine Size (L)", ylab="CO2 Emissions (g/km))")
+plot(train$co2_emissions ~ train$cylinders, main="CO2 Emissions (g/km)) v.Number of Cylinders", xlab="Number of Cylinders", ylab="CO2 Emissions (g/km))")
+
+```
+The EDA looks very good, no signs of violated assumptions as histograms look normal and scatter plots also look linear
+
+Variable selection on training model
+```{r}
+# Check assumptions
+train_mod <- lm(co2_emissions ~ engine_size_L + cylinders ,data=train)
+train_mod2 <- lm(co2_emissions ~ engine_size_L ,data=train)
+train_mod3 <- lm(co2_emissions ~ cylinders ,data=train)
+
+# Model seems decent and assumptions hold
+train_r <- resid(train_mod)
+pairs(train[,1:3])
+plot(train$co2_emissions ~ fitted(train_mod), main="Y versus Y-hat", xlab="Y-hat", ylab="Y")
+abline(a = 0, b = 1)
+lines(lowess(train$co2_emissions ~ fitted(train_mod)), lty=2)
+par(mfrow=c(2,3))
+plot(train_r ~ fitted(train_mod), main="Fitted vs Residuals", xlab="Fitted", ylab="res.")
+plot(train_r ~ train$engine_size_L, main="Engine Size vs Residuals", xlab="Engine Size", ylab="res")
+plot(train_r ~ train$cylinders, main=" Number of Cylinders vs Residuals", xlab="Cylinders", ylab="res")
+qqnorm(train_r)
+
+
+p <- powerTransform(cbind(train[,1], train[,2], train[,3])~1)
+summary(p)
+
+
+select(train_mod, 7126)
+select(train_mod2, 7126)
+select(train_mod3, 7126)
+
+anova(train_mod2, train_mod)
+anova(train_mod3, train_mod)
+
+# This tells us that we should again keep both engine_size and cylinders in the model as they explain a significant portion of variation
+
+# Now we fit this model into our test model
+test_mod <- lm(co2_emissions ~ engine_size_L + cylinders ,data=test)
+
+test_r <- resid(test_mod)
+pairs(test[,1:3])
+plot(test$co2_emissions ~ fitted(test_mod), main="Y versus Y-hat", xlab="Y-hat", ylab="Y")
+abline(a = 0, b = 1)
+lines(lowess(test$co2_emissions ~ fitted(test_mod)), lty=2)
+par(mfrow=c(2,3))
+plot(test_r ~ fitted(test_mod), main="Fitted vs Residuals", xlab="Fitted", ylab="res.")
+plot(test_r ~ test$engine_size_L, main="Engine Size vs Residuals", xlab="Engine Size", ylab="res")
+plot(test_r ~ test$cylinders, main="Number of Cylinders vs Residuals", xlab="Cylinders", ylab="res")
+qqnorm(test_r)
+
+
+summary(train_mod)
+summary(test_mod)
+
+# Based on the summary, we can see that the test and train models are quite similar
+
+#   - minimal changes in the regression coefficients so the model is quite similar
+#   - both models show that the predictors are significant
+#   - both models have no model violations and look very similar as well
+#   - both models have similar R^2 values
+# Hence our model is validated
+```
+
+
